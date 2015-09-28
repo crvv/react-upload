@@ -15,16 +15,19 @@ var path = require('path');
 var express = require('express');
 var busboy = require('express-busboy');
 var app = express();
+var expressWs = require('express-ws')(app);
 
+var fileDir = path.join(__dirname, 'public/files');
+var tmpDir = path.join(fileDir, 'tmp');
 busboy.extend(app, {upload: true, path: 'tmp/'});
 app.set('port', (process.env.PORT || 3000));
 
 app.use('/', express.static(path.join(__dirname, 'public')));
 
 app.get('/api/download', function (req, res) {
-    fs.readdir('public/files', function (err, files) {
+    fs.readdir(fileDir, function (err, files) {
         files.forEach(function (element, index) {
-            if (element.startsWith('.')) {
+            if (element.startsWith('.') || element === 'tmp') {
                 files.splice(index, 1);
             }
         });
@@ -33,11 +36,56 @@ app.get('/api/download', function (req, res) {
     });
 });
 
-app.post('/api/upload', function (req, res) {
-    for(var filename in req.files) {
-        fs.rename(req.files[filename].file, 'public/files/' + filename);
-    }
-    res.end();
+app.ws('/api/upload', function (ws, req) {
+    var file = null;
+    var fileStat;
+    var progressFilename;
+    var partFilename;
+    var blocks = {
+        size: 0,
+        left: {}
+    };
+    var left = 0;
+    var writeToFile = function (msg) {
+        if (file == null) {
+            file = fs.openSync(partFilename, 'w')
+        }
+        fs.write(file, msg, function (err, written, string) {
+            console.log(err, written, string);
+        });
+        left--;
+        if (left == 0) {
+            console.log('close');
+            fs.closeSync(file);
+        }
+    };
+    ws.on('message', function (msg) {
+        if (blocks.size > 0) {
+            writeToFile(msg);
+            return;
+        }
+        fileStat = JSON.parse(msg);
+        progressFilename = path.join(tmpDir, fileStat.md5);
+        partFilename = progressFilename + '.part';
+        fs.access(progressFilename, fs.F_OK, function (err) {
+            if (err) {
+                blocks.size = 512 * 1024;
+                var blockCount = fileStat.size / blocks.size;
+                if (!Number.isInteger(blockCount)) {
+                    blockCount = Math.floor(blockCount) + 1;
+                }
+                for (var i = 0; i < blockCount; i++) {
+                    blocks.left[i] = 1;
+                }
+            } else {
+                fs.readFile(progressFilename, function (err, data) {
+                    blocks = JSON.parse(data);
+                });
+            }
+            left = Object.keys(blocks.left).length;
+            ws.send(JSON.stringify(blocks));
+        });
+    });
 });
 
 
