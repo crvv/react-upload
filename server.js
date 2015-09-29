@@ -24,9 +24,9 @@ app.set('port', (process.env.PORT || 3000));
 
 app.use('/', express.static(path.join(__dirname, 'public')));
 
-app.get('/api/download', function (req, res) {
-    fs.readdir(fileDir, function (err, files) {
-        files.forEach(function (element, index) {
+app.get('/api/download', (req, res) => {
+    fs.readdir(fileDir, (err, files) => {
+        files.forEach((element, index) => {
             if (element.startsWith('.') || element === 'tmp') {
                 files.splice(index, 1);
             }
@@ -36,30 +36,45 @@ app.get('/api/download', function (req, res) {
     });
 });
 
-app.ws('/api/upload', function (ws, req) {
+app.ws('/api/upload', (ws, req) => {
     var file = null;
     var fileStat;
     var progressFilename;
     var partFilename;
+    var filename;
     var blocks = {
         size: 0,
         left: {}
     };
-    var left = 0;
-    var writeToFile = function (msg) {
+    var writeToFile = (msg) => {
         if (file == null) {
-            file = fs.openSync(partFilename, 'w')
+            file = fs.openSync(partFilename, 'a');
         }
-        fs.write(file, msg, function (err, written, string) {
-            console.log(err, written, string);
-        });
-        left--;
-        if (left == 0) {
-            console.log('close');
+        var num = msg.readUInt32LE(0);
+        fs.writeSync(file, msg, 4, msg.length - 4, num * blocks.size);
+        delete blocks.left[num];
+        if (Object.keys(blocks.left).length == 0) {
             fs.closeSync(file);
         }
     };
-    ws.on('message', function (msg) {
+    ws.on('close', () => {
+        if (file != null) {
+            fs.closeSync(file);
+            if (Object.keys(blocks.left).length == 0) {
+                fs.rename(partFilename, filename, (err) => {
+                    if (err != null) {
+                        console.log(err);
+                    }
+                });
+                fs.unlink(progressFilename, (err) => {
+                    //ignore 'no such file or directory' exception
+                });
+            } else {
+                fs.writeFileSync(progressFilename, JSON.stringify(blocks));
+            }
+        }
+    });
+    ws.on('message', (msg) => {
         if (blocks.size > 0) {
             writeToFile(msg);
             return;
@@ -67,7 +82,8 @@ app.ws('/api/upload', function (ws, req) {
         fileStat = JSON.parse(msg);
         progressFilename = path.join(tmpDir, fileStat.md5);
         partFilename = progressFilename + '.part';
-        fs.access(progressFilename, fs.F_OK, function (err) {
+        filename = path.join(fileDir, fileStat.name);
+        fs.access(progressFilename, fs.F_OK, (err) => {
             if (err) {
                 blocks.size = 512 * 1024;
                 var blockCount = fileStat.size / blocks.size;
@@ -78,17 +94,14 @@ app.ws('/api/upload', function (ws, req) {
                     blocks.left[i] = 1;
                 }
             } else {
-                fs.readFile(progressFilename, function (err, data) {
-                    blocks = JSON.parse(data);
-                });
+                blocks = JSON.parse(fs.readFileSync(progressFilename));
             }
-            left = Object.keys(blocks.left).length;
             ws.send(JSON.stringify(blocks));
         });
     });
 });
 
 
-app.listen(app.get('port'), function () {
+app.listen(app.get('port'), () => {
     console.log('Server started: http://localhost:' + app.get('port') + '/');
 });
