@@ -13,13 +13,11 @@
 var fs = require('fs');
 var path = require('path');
 var express = require('express');
-var busboy = require('express-busboy');
 var app = express();
 var expressWs = require('express-ws')(app);
 
 var fileDir = path.join(__dirname, 'public/files');
 var tmpDir = path.join(fileDir, 'tmp');
-busboy.extend(app, {upload: true, path: 'tmp/'});
 app.set('port', (process.env.PORT || 3000));
 
 app.use('/', express.static(path.join(__dirname, 'public')));
@@ -53,9 +51,6 @@ app.ws('/api/upload', (ws, req) => {
         var num = msg.readUInt32LE(0);
         fs.writeSync(file, msg, 4, msg.length - 4, num * blocks.size);
         delete blocks.left[num];
-        if (Object.keys(blocks.left).length == 0) {
-            fs.closeSync(file);
-        }
     };
     ws.on('close', () => {
         if (file != null) {
