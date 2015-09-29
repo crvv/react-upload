@@ -24,11 +24,11 @@ app.use('/', express.static(path.join(__dirname, 'public')));
 
 app.get('/api/download', (req, res) => {
     fs.readdir(fileDir, (err, files) => {
-        files.forEach((element, index) => {
-            if (element.startsWith('.') || element === 'tmp') {
-                files.splice(index, 1);
+        for (var i = files.length - 1; i >= 0; i--) {
+            if (files[i].startsWith('.') || files[i] === 'tmp') {
+                files.splice(i, 1);
             }
-        });
+        }
         res.setHeader('Cache-Control', 'no-cache');
         res.json(JSON.stringify(files));
     });
