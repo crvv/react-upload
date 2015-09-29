@@ -13,13 +13,11 @@
 var fs = require('fs');
 var path = require('path');
 var express = require('express');
-var busboy = require('express-busboy');
 var app = express();
 var expressWs = require('express-ws')(app);
 
 var fileDir = path.join(__dirname, 'public/files');
 var tmpDir = path.join(fileDir, 'tmp');
-busboy.extend(app, {upload: true, path: 'tmp/'});
 app.set('port', (process.env.PORT || 3000));
 
 app.use('/', express.static(path.join(__dirname, 'public')));
