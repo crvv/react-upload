@@ -51,9 +51,6 @@ app.ws('/api/upload', (ws, req) => {
         var num = msg.readUInt32LE(0);
         fs.writeSync(file, msg, 4, msg.length - 4, num * blocks.size);
         delete blocks.left[num];
-        if (Object.keys(blocks.left).length == 0) {
-            fs.closeSync(file);
-        }
     };
     ws.on('close', () => {
         if (file != null) {
