@@ -30,89 +30,101 @@ async function md5(file) {
 class Uploader {
 
     constructor(file, url, box) {
+        this.file = file;
+        this.url = url;
+        this.box = box;
         this.name = file.name;
         this.progress = 0;
-        var self = this;
-        var webSocket = new WebSocket('ws://' + window.location.host + url);
-        var intervalID = 0;
-        var block = {};
-        var blockSize = 0;
-        var blockLeft = 0;
-        var cancelled = false;
-        var completed = false;
-        this.cancel = () => {
-            cancelled = true;
-            console.log(self.name, 'cancel');
-            self.done();
-        };
-        this.done = () => {
-            console.log(self.name, 'end');
-            window.clearInterval(intervalID);
-            webSocket.close();
-            box.filesUploading.forEach((uploader, index) => {
-                if (Object.is(uploader, self)) {
-                    box.filesUploading.splice(index, 1);
-                }
-            });
-            box.refresh();
-            self = null;
-        };
-        this.error = () => {
-            console.log(self.name, 'error');
-            window.clearInterval(intervalID);
-            webSocket.close();
-            self.progress = -1;
-            box.refresh();
-        };
-        this.refreshProgress = () => {
-            self.progress = 1 - (webSocket.bufferedAmount + blockLeft * blockSize) / file.size;
-            if (webSocket.bufferedAmount < blockSize) {
-                self.sendNextBlock();
+        this.webSocket = new WebSocket('ws://' + window.location.host + url);
+        this.intervalID = 0;
+        this.block = {};
+        this.blockSize = 0;
+        this.blockLeft = 0;
+        this.cancelled = false;
+        this.completed = false;
+        this.start.call(this);
+        this.cancel = this.cancel.bind(this);
+    }
+
+    cancel() {
+        this.cancelled = true;
+        //console.log(this.name, 'cancel');
+        this.done();
+        return this;
+    }
+
+    done() {
+        //console.log(this.name, 'end');
+        window.clearInterval(this.intervalID);
+        this.webSocket.close();
+        this.box.filesUploading.forEach((uploader, index) => {
+            if (Object.is(uploader, this)) {
+                this.box.filesUploading.splice(index, 1);
             }
-            box.refresh();
-            if (webSocket.bufferedAmount == 0) {
-                completed = true;
-                self.done();
-            }
+        });
+        this.box.refresh();
+        return this;
+    }
+    error() {
+        //console.log(this.name, 'error');
+        window.clearInterval(intervalID);
+        this.webSocket.close();
+        this.progress = -1;
+        this.box.refresh();
+        return this;
+    }
+
+    refreshProgress() {
+        this.progress = 1 - (this.webSocket.bufferedAmount + this.blockLeft * this.blockSize) / this.file.size;
+        if (this.webSocket.bufferedAmount < this.blockSize) {
+            this.sendNextBlock();
+        }
+        this.box.refresh();
+        if (this.webSocket.bufferedAmount == 0) {
+            this.completed = true;
+            this.done();
+        }
+        return this;
+    }
+
+    sendNextBlock() {
+        for (var blockNum in this.block.left) {
+            var start = blockNum * this.block.size;
+            var num = new Uint32Array(1);
+            num[0] = blockNum;
+            this.webSocket.send(new Blob([num, this.file.slice(start, start + this.block.size)]));
+            this.blockLeft--;
+            delete this.block.left[blockNum];
+            return this;
+        }
+    }
+
+    start() {
+        this.webSocket.onerror = () => {
+            this.error();
         };
-        this.sendNextBlock = () => {
-            for (var blockNum in block.left) {
-                var start = blockNum * block.size;
-                var num = new Uint32Array(1);
-                num[0] = blockNum;
-                webSocket.send(new Blob([num, file.slice(start, start + block.size)]));
-                blockLeft--;
-                delete block.left[blockNum];
+        this.webSocket.onclose = () => {
+            if (this.cancelled || this.completed) {
                 return;
             }
+            this.error();
         };
-        this.start = () => {
-            webSocket.onerror = () => {
-                self.error();
+        this.webSocket.onopen = async () => {
+            var hash = await md5(this.file);
+            var fileStat = {
+                name: this.file.name,
+                md5: hash,
+                size: this.file.size
             };
-            webSocket.onclose = () => {
-                if (cancelled || completed) {
-                    return;
-                }
-                self.error();
-            };
-            webSocket.onopen = async () => {
-                var hash = await md5(file);
-                var fileStat = {
-                    name: file.name,
-                    md5: hash,
-                    size: file.size
-                };
-                webSocket.send(JSON.stringify(fileStat));
-            };
-            webSocket.onmessage = (event) => {
-                block = JSON.parse(event.data);
-                blockLeft = Object.keys(block.left).length;
-                blockSize = block.size;
-                intervalID = window.setInterval(self.refreshProgress, 20);
-            };
+            this.webSocket.send(JSON.stringify(fileStat));
         };
-        this.start();
+        this.webSocket.onmessage = (event) => {
+            this.block = JSON.parse(event.data);
+            this.blockLeft = Object.keys(this.block.left).length;
+            this.blockSize = this.block.size;
+            this.intervalID = window.setInterval(this.refreshProgress.bind(this), 20);
+        };
+        return this;
     }
 }
 
